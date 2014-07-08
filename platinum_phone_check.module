@@ -1,0 +1,125 @@
+<?php
+
+function platinum_phone_check_menu() {
+	$menu['admin/config/platinum-notification-email'] =  array(
+		'title' => 'Platinum Phone Check Config',
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array(
+			'platinum_phone_check_config'
+		),
+		'access arguments' => array(
+			'admininster platinum notification'
+		),
+	);
+	return $menu;
+}
+
+function platinum_phone_check_permission() {
+	return array( 'admininster platinum notification' => array('title' => t('Administer Platinum Notification')));
+}
+
+function platinum_phone_check_config() {
+	$form['platinum_notification_subject'] =  array(
+		'#type' => 'textfield',
+		'#title' => 'Subject',
+		'#default_value' => variable_get('platinum_notification_subject',''),
+	);
+	$form['platinum_notification_body'] =  array(
+		'#type' => 'textarea',
+		'#title' => 'Body',
+		'#description' => '<ul><li>Use <strong>%user</strong> to print out the user\'s name.</li></ul>',
+		'#default_value' => variable_get('platinum_notification_body',''),
+	);
+	return system_settings_form($form);
+}
+
+function platinum_phone_check_node_presave($node) {
+	if (($node->type == 'leakn_post') && ($node->nid == '')) {
+		if ($node->field_leak_mob_num_leak['und'][0]['number']) {
+			// look for existing user with phone numner
+			$result = db_query(" SELECT entity_id FROM {field_data_field_acct_mob_phone} WHERE field_acct_mob_phone_number = :number", array(':number' => $node->field_leak_mob_num_leak['und'][0]['number']));
+			foreach ($result as $r) {
+				$uids[] = $r->entity_id;
+			}
+			// look for phone numner in gold table
+			$result = db_query(" SELECT entity_id FROM {field_revision_field_acct_addtl_phone_gold}	WHERE field_acct_addtl_phone_gold_number = :number", array(':number' => $node->field_leak_mob_num_leak['und'][0]['number']));
+			foreach ($result as $r) {
+				$uids[] = $r->entity_id;
+			}
+			// look for phone numner in platinum table
+			$result = db_query(" SELECT entity_id FROM {field_revision_field_acct_addtl_phone_plat} WHERE field_acct_addtl_phone_plat_number = :number", array(':number' => $node->field_leak_mob_num_leak['und'][0]['number']));
+			foreach ($result as $r) {
+				$uids[] = $r->entity_id;
+			}
+		}
+		if (isset($node->field_leak_email_leak['und'][0]['email'])) {
+			// look for user with email address in user table
+			$result = db_query(" SELECT uid FROM {users} WHERE mail = :mail", array(':mail' => $node->field_leak_email_leak['und'][0]['email']));
+			foreach ($result as $r) {
+				$uids[] = $r->uid;
+			}
+			// look for email in gold table
+			$result = db_query(" SELECT entity_id FROM {field_revision_field_acct_addtl_emails_gold} WHERE field_acct_addtl_emails_gold_email  = :email", array(':email' => $node->field_leak_email_leak['und'][0]['email']));
+			foreach ($result as $r) {
+				$uids[] = $r->entity_id;
+			}
+			// look for email in platinum table
+			$result = db_query(" SELECT entity_id FROM {field_revision_field_acct_addtl_emails_plat} WHERE field_acct_addtl_emails_plat_email  = :email", array(':email' => $node->field_leak_email_leak['und'][0]['email']));
+			foreach ($result as $r) {
+				$uids[] = $r->entity_id;
+			}
+		}
+		// if the user exists, check to see if it has the platinum role
+		if (!empty($uids)) {
+			foreach ($uids as $uid) {
+				$user = user_load($uid);
+				// look for platinum role... if found don't publish for 24 hours
+				if (isset($user->roles['6'])) {
+					if ($user->roles['6'] == 'Platinum') {
+						// hold off publishing for 24 hours
+						$node->publish_on = date('Y-m-d H:i:s',(time() + (24 * 60 * 60)));
+					}
+				}
+				// kick off rule that sends notifications here
+				$subject = variable_get('platinum_notification_subject','');
+				$body = str_replace('%user',$user->name,variable_get('platinum_notification_body',''));
+				// mail user notificaiton they have been leaked on
+				$module = 'platinum_phone_check';
+				$key = 'key';
+				$language = language_default();
+				$params = array();
+				$from = NULL;
+				$send = FALSE;
+				$email = $user->mail;
+				$message = drupal_mail($module, $key, $email, $language, $params, $from, $send);
+				$message['subject'] = $subject;
+				$message['body'] = array();
+				$message['body'][] = $body;
+				// Retrieve the responsible implementation for this message.
+				$system = drupal_mail_system($module, $key);
+				// Format the message body.
+				$message = $system->format($message);
+				// Send e-mail.
+				$message['result'] = $system->mail($message);
+			} // end foreach
+		} // end if $uids
+	} // end if $node->type = leakn post
+}
+
+/* checks for users entering their own phone numnber */
+/*function platinum_phone_check_node_validate($node, $form, &$form_state) {
+	if ($form['type']['#value'] == 'leakn_post') {
+		global $user;
+		$user_number = db_query("SELECT field_acct_mob_phone_number FROM {field_data_field_acct_mob_phone} WHERE entity_id = :uid", array(':uid'=>$user->uid))->fetchField();
+		$submitted_number = $form['field_leak_mob_num_leak']['und'][0]['#value']['number'];
+		if (clean_up_numbers($user_number) == clean_up_numbers($submitted_number)) {
+			form_set_error('field_leak_mob_num_leak','You can\'t Leak on yourself!!!');
+		}
+	}
+}
+
+function clean_up_numbers($number) {
+	return str_replace(')','',str_replace('(','',str_replace('-','',str_replace(' ','',$number))));
+}*/
+
+
